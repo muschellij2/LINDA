@@ -58,6 +58,7 @@ T1-weighted MRI of a patient with (left hemispheric) stroke
 
 -----
 
+
 ## Run:
 
 Open R and source the file linda\_predict.R
