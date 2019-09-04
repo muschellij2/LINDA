@@ -11,7 +11,10 @@
 #' @param sigma Smoothing factor, passed to
 #' \code{\link{asymmetry_mask}} and
 #' \code{\link{smoothImage}}
-#' @param cache Should files be just read in if they already exist?
+#' @param cache Should files be just read in if they already exist?  If
+#' \code{FALSE}, data will be overwritten if already run
+#' @param transform_mni If \code{TRUE}, subject scan and lesion will be
+#' transformed into \code{MNI} space.
 #'
 #' @return A list of things
 #' @export
@@ -26,11 +29,12 @@ linda_predict = function(
   file,
   brain_mask = NULL,
   n_skull_iter = 2,
-  verbose = TRUE,
+  transform_mni = TRUE,
   outdir = NULL,
   voxel_resampling = c(2, 2, 2),
   sigma = 2,
   reflaxis = 0,
+  verbose = TRUE,
   cache = TRUE) {
 
   stopifnot(is.character(file))
@@ -328,7 +332,7 @@ linda_predict = function(
     verbose = verbose > 1
   )
   probles_file = file.path(outdir,
-                            'Prediction3_probability_template.nii.gz')
+                           'Prediction3_probability_template.nii.gz')
   L$lesion_probability_template = probles_file
   print_msg("Saving probabilistic prediction in template space...",
             verbose = verbose)
@@ -357,63 +361,65 @@ linda_predict = function(
 
   mni = antsImageRead(mni)
 
-  print_msg("Transferring data in MNI (ch2) space...",
-            verbose = verbose)
-
-
-
-  warpmni = system.file("extdata", "pennTemplate",
-                        "templateToCh2_1Warp.nii.gz",
-                        package = "LINDA",
-                        mustWork = FALSE)
-
-  affmni = system.file("extdata",
-                       "pennTemplate",
-                       "templateToCh2_0GenericAffine.mat",
-                       package = "LINDA",
-                       mustWork = FALSE)
-
-  if (!all(file.exists(warpmni, affmni))) {
-    print_msg(paste0("Registering LINDA template to MNI (ch2) - get full release to eleminate this step" ,
-                     "..."),
+  if (transform_mni) {
+    print_msg("Transferring data in MNI (ch2) space...",
               verbose = verbose)
-    temp_to_ch2 = antsRegistration(
-      fixed = mni, moving = temp,
-      typeofTransform = "SyNCC",
-      verbose = verbose > 1)
-    matrices = c(temp_to_ch2$fwdtransforms, affpenn, warppenn)
-  } else {
-    matrices = c(warpmni, affmni, affpenn, warppenn)
+
+    warpmni = system.file("extdata", "pennTemplate",
+                          "templateToCh2_1Warp.nii.gz",
+                          package = "LINDA",
+                          mustWork = FALSE)
+
+    affmni = system.file("extdata",
+                         "pennTemplate",
+                         "templateToCh2_0GenericAffine.mat",
+                         package = "LINDA",
+                         mustWork = FALSE)
+
+    if (!all(file.exists(warpmni, affmni))) {
+      print_msg(paste0(
+        "Registering LINDA template to MNI (ch2) - ",
+        "get full release to eleminate this step" ,
+        "..."),
+        verbose = verbose)
+      temp_to_ch2 = antsRegistration(
+        fixed = mni, moving = temp,
+        typeofTransform = "SyNCC",
+        verbose = verbose > 1)
+      matrices = c(temp_to_ch2$fwdtransforms, affpenn, warppenn)
+    } else {
+      matrices = c(warpmni, affmni, affpenn, warppenn)
+    }
+
+    submni = antsApplyTransforms(
+      moving = simg,
+      fixed = mni,
+      transformlist = matrices,
+      interpolator = 'Linear',
+      whichtoinvert = c(0, 0, 1, 0),
+      verbose = verbose > 1
+    )
+    lesmni = antsApplyTransforms(
+      moving = segnative,
+      fixed = mni,
+      transformlist = matrices,
+      interpolator = 'NearestNeighbor',
+      whichtoinvert = c(0, 0, 1, 0),
+      verbose = verbose > 1
+    )
+
+    print_msg("Saving subject in MNI (ch2) space...",
+              verbose = verbose)
+    t1_template = file.path(outdir, 'Subject_in_MNI.nii.gz')
+    antsImageWrite(submni, t1_template)
+
+    L$t1_template = t1_template
+
+    print_msg("Saving lesion in MNI (ch2) space...",
+              verbose = verbose)
+    lesion_template = file.path(outdir, 'Lesion_in_MNI.nii.gz')
+    L$lesion_template = lesion_template
+    antsImageWrite(lesmni, lesion_template)
   }
-
-  submni = antsApplyTransforms(
-    moving = simg,
-    fixed = mni,
-    transformlist = matrices,
-    interpolator = 'Linear',
-    whichtoinvert = c(0, 0, 1, 0),
-    verbose = verbose > 1
-  )
-  lesmni = antsApplyTransforms(
-    moving = segnative,
-    fixed = mni,
-    transformlist = matrices,
-    interpolator = 'NearestNeighbor',
-    whichtoinvert = c(0, 0, 1, 0),
-    verbose = verbose > 1
-  )
-
-  print_msg("Saving subject in MNI (ch2) space...",
-            verbose = verbose)
-  t1_template = file.path(outdir, 'Subject_in_MNI.nii.gz')
-  antsImageWrite(submni, t1_template)
-
-  L$t1_template = t1_template
-
-  print_msg("Saving lesion in MNI (ch2) space...",
-            verbose = verbose)
-  lesion_template = file.path(outdir, 'Lesion_in_MNI.nii.gz')
-  L$lesion_template = lesion_template
-  antsImageWrite(lesmni, lesion_template)
   return(L)
 }
