@@ -1,7 +1,7 @@
 Type: Package
 Package: LINDA
 Title: Lesion Identification with Neighborhood Data Analysis
-Version: 0.4.1
+Version: 0.5.0
 Authors@R: 
     c(
     person(given = "Dorian",
@@ -17,10 +17,10 @@ Authors@R:
 Description: A neuroimaging toolkit for automatic segmentation
     of chronic stroke lesions.
 License: Apache License | file LICENSE
-Depends: R (>= 2.10)
+Depends: R (>= 3.0)
 Imports:
-    ANTsR (>= 0.4.6),
-    ANTsRCore (>= 0.6.0.1),
+    ANTsR,
+    ANTsRCore,
     randomForest,
     magrittr,
     stats,
@@ -29,7 +29,8 @@ Suggests:
     covr,
     knitr,
     rmarkdown,
-    testthat
+    testthat,
+    devtools
 Remotes: 
     ANTsX/ANTsRCore,
     ANTsX/ANTsR

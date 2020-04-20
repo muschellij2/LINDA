@@ -18,9 +18,7 @@
 #' @author Avants BB, Tustison NJ, Pustina D
 #'
 #' @export
-#' @importFrom ANTsRCore lappend makeImage matrixToImages
-#' @importFrom ANTsRCore getNeighborhoodInMask imageListToMatrix
-#' @importFrom ANTsR splitMask
+#'
 #' @importFrom stats predict
 #' @import randomForest
 #'
@@ -108,7 +106,7 @@ linda_mrvnrfs.predict_chunks <- function(
 
       cropmask = thresholdImage(chunkmask, ch, ch)
 
-      print_msg("Neighborhood for mask", verbose = verbose)
+      # print_msg("Neighborhood for mask", verbose = verbose)
 
       # start filling fm
       testmat<-t(getNeighborhoodInMask( cropmask, cropmask,
@@ -120,7 +118,7 @@ linda_mrvnrfs.predict_chunks <- function(
                   ncol=ncol(testmat)*nfeats  )
       rm( testmat )
 
-      print_msg("Neighborhood info from features", verbose = verbose)
+      # print_msg("Neighborhood info from features", verbose = verbose)
 
       seqby<-seq.int( 1, hdsz*length(xsub)+1, by=hdsz )
       for ( i in 1:(length(xsub)) )
@@ -142,7 +140,7 @@ linda_mrvnrfs.predict_chunks <- function(
         fm[ seqby[i]:nxt, ]<-m1
       } # end filling fm, ready for predict
 
-      print_msg("Predicting from RF", verbose = verbose)
+      # print_msg("Predicting from RF", verbose = verbose)
 
       probs<-t( predict( rflist[[rfct]] ,newdata=fm, type=predtype) )
 
@@ -182,13 +180,13 @@ linda_mrvnrfs.predict_chunks <- function(
     }  # end chunk loop
     rm(masterprobs)
     rfct<-rfct+1
-    print(rfct)
+    # print(rfct)
   } # mr loop
 
   # prediction is finished, create segmentation
   if ( asFactors )
   {
-    print_msg("Making Segmentations", verbose = verbose)
+    # print_msg("Making Segmentations", verbose = verbose)
 
     rfseg=list()
     for (segno in 1:length(newprobs)) {

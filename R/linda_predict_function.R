@@ -11,42 +11,75 @@
 #' @param sigma Smoothing factor, passed to
 #' \code{\link{asymmetry_mask}} and
 #' \code{\link{smoothImage}}
-#' @param cache Should files be just read in if they already exist?  If
-#' \code{FALSE}, data will be overwritten if already run
-#' @param transform_mni If \code{TRUE}, subject scan and lesion will be
-#' transformed into \code{MNI} space.
+#' @param saveMNI (logical) whether to save outputs in MNI space
+#' If transformation files are available, \code{saveMNI=TRUE}.
+#' Otherwise \code{saveMNI=FALSE}. Manually setting to TRUE
+#' without transformation files will force a de novo registration
+#' between internal templates.
+#' @param cache (default=TRUE) use existing processed files to
+#' speed up processing. Useful for interrupted processes. Will
+#' re-process and overwrite if set to FALSE
+#' @param verbose print diagnostic messages
 #'
 #' @return A list of things
 #' @export
 #'
-#' @importFrom ANTsRCore iMath antsImageRead antsImageWrite antsRegistration
-#' @importFrom ANTsRCore resampleImage smoothImage thresholdImage antsImageClone
-#' @importFrom ANTsRCore antsApplyTransforms is.antsImage resampleImageToTarget
-#' @importFrom ANTsR abpN4 abpBrainExtraction reflectImage
-#' @importFrom ANTsR composeTransformsToField splitMask
+#' @import ANTsRCore
+#' @import ANTsR
 #' @importFrom magrittr %>%
+#' @importFrom utils capture.output installed.packages
+#' @importFrom utils sessionInfo packageVersion
 linda_predict = function(
-  file,
+  file=NA,
   brain_mask = NULL,
   n_skull_iter = 2,
-  transform_mni = TRUE,
   outdir = NULL,
   voxel_resampling = c(2, 2, 2),
   sigma = 2,
   reflaxis = 0,
   verbose = TRUE,
+  saveMNI = file.exists(
+    system.file("extdata", "pennTemplate",
+                "templateToCh2_0GenericAffine.mat", package = "LINDA", mustWork = FALSE)),
   cache = TRUE) {
 
-  stopifnot(is.character(file))
+  toc=Sys.time()
+
+  # start capturing window output to save later
+  outputLog = capture.output({
+
+  print_msg(paste0('Starting LINDA v', packageVersion('LINDA')),
+            verbose=verbose)
+
+  if (is.na(file)) { # user did not specify a file, open chooser
+    file = file.choose()
+  } else { # user specified the file
+    if ( !file.exists(file) ) stop(paste( 'File inexistent:', file ))
+  }
 
   # create linda folder
   if (is.null(outdir)) {
     outdir = file.path(dirname(file), "linda")
   }
-  print_msg(paste(
-    'Creating folder:',
-    outdir), verbose = verbose)
-  dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+
+  if (!dir.exists(outdir)) {
+    print_msg(paste(
+      'Creating folder:', outdir), verbose = verbose)
+    dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+  } else {
+    print_msg(paste(
+      'Using existing folder:', outdir), verbose = verbose)
+  }
+
+  # if folder has already the final native output, stop processing
+  segnative_file = file.path(outdir, 'Prediction3_native.nii.gz')
+  if (file.exists(segnative_file) & cache) {
+    print_msg('\nLINDA segmentation already present in folder.\n   Use "cache=FALSE" to reprocess and overwrite.',
+              verbose=verbose)
+    return(NULL)
+  }
+
+
 
   template = system.file(
     "extdata", "pennTemplate", "template.nii.gz",
@@ -78,6 +111,7 @@ linda_predict = function(
     )
     L = as.list(ss_files)
     if (all(file.exists(ss_files)) & cache) {
+      print_msg('Found existing skull stripped files, loading ...', verbose = verbose)
       ss = lapply(ss_files, antsImageRead)
       n4 = ss$n4
       submask = ss$brain_mask
@@ -94,13 +128,16 @@ linda_predict = function(
       submask = ss$brain_mask
       simg = ss$n4_brain
 
-      print_msg("Saving skull stripped files", verbose = verbose)
+      print_msg("Saving skull stripped files...", verbose = verbose)
 
       antsImageWrite(n4, ss_files["n4"])
       antsImageWrite(submask, ss_files["brain_mask"])
       antsImageWrite(simg, ss_files["n4_brain"])
     }
   } else {
+    print_msg('Brain mask provided by user, using to skull strip ...',
+              verbose = verbose)
+
     brain_mask = reader(brain_mask)
     brain_mask_file = file.path(outdir, 'BrainMask.nii.gz')
     antsImageWrite(brain_mask, brain_mask_file)
@@ -116,7 +153,7 @@ linda_predict = function(
   tempmask = antsImageRead(template_mask)
 
   # load other functions
-  print_msg("Loading LINDA model", verbose = verbose)
+  # print_msg("Loading LINDA model...", verbose = verbose)
 
   outfiles = c(
     flipped = file.path(outdir, 'N4corrected_Brain_LRflipped.nii.gz'),
@@ -125,6 +162,8 @@ linda_predict = function(
   L = c(L, as.list(outfiles))
 
   if (all(file.exists(outfiles)) & cache) {
+    print_msg('Found existing asymmetry mask, loading...', verbose = verbose)
+
     asymmetry = lapply(outfiles, antsImageRead)
     mask.lesion1 = asymmetry$lesion_mask
   } else {
@@ -159,10 +198,15 @@ linda_predict = function(
 
 
   if (all(file.exists(outfiles)) & cache) {
+    print_msg('Found existing mask from 1st prediction, loading ...', verbose = verbose)
+
     out1 = lapply(outfiles, antsImageRead)
     mask.lesion2 = out1$lesion_mask
     prediction = out1$prediction
   } else {
+
+    print_msg('1st round of prediction...', verbose=verbose)
+
     out1 = run_prediction(
       img = simg,
       brain_mask = submask,
@@ -195,10 +239,14 @@ linda_predict = function(
   L = c(L, as.list(o))
 
   if (all(file.exists(outfiles)) & cache) {
+    print_msg('Found existing mask from 2nd prediction, loading ...', verbose = verbose)
+
     out2 = lapply(outfiles, antsImageRead)
     mask.lesion3 = out2$lesion_mask
     prediction2 = out2$prediction
   } else {
+
+    print_msg('2nd round of prediction...', verbose=verbose)
 
     out2 = run_prediction(
       img = simg,
@@ -221,9 +269,10 @@ linda_predict = function(
   }
 
 
+  print_msg('3rd round of prediction...', verbose=verbose)
   outfiles = c(
     prediction = file.path(outdir,
-                           'Prediction2.nii.gz'),
+                           'Prediction3.nii.gz'),
     lesion_mask = file.path(outdir, 'Mask.lesion4.nii.gz')
   )
   o = as.list(outfiles)
@@ -347,8 +396,6 @@ linda_predict = function(
 
 
   # save in MNI coordinates
-  print_msg("Transferring data in MNI (ch2) space...",
-            verbose = verbose)
 
   # warppenn = file.path(outdir, 'Reg3_sub_to_template_warp.nii.gz')
   warppenn = reg_to_temp_warp
@@ -361,6 +408,7 @@ linda_predict = function(
 
   mni = antsImageRead(mni)
 
+<<<<<<< HEAD
   if (transform_mni) {
     print_msg("Transferring data in MNI (ch2) space...",
               verbose = verbose)
@@ -413,6 +461,56 @@ linda_predict = function(
     t1_template = file.path(outdir, 'Subject_in_MNI.nii.gz')
     antsImageWrite(submni, t1_template)
 
+=======
+  warpmni = system.file("extdata", "pennTemplate",
+                        "templateToCh2_1Warp.nii.gz",
+                        package = "LINDA",
+                        mustWork = FALSE)
+
+  affmni = system.file("extdata",
+                       "pennTemplate",
+                       "templateToCh2_0GenericAffine.mat",
+                       package = "LINDA",
+                       mustWork = FALSE)
+  if (saveMNI) {
+    if (!all(file.exists(warpmni, affmni))) {
+      print_msg("No MNI transformations available, registering de novo\n     get full release to eleminate this step",
+                verbose = verbose)
+      temp_to_ch2 = antsRegistration(
+        fixed = mni, moving = temp,
+        typeofTransform = "SyNCC",
+        verbose = verbose > 1)
+      matrices = c(temp_to_ch2$fwdtransforms, affpenn, warppenn)
+    } else {
+      matrices = c(warpmni, affmni, affpenn, warppenn)
+    }
+
+    print_msg("Transferring data in MNI (ch2) space...",
+              verbose = verbose)
+
+    submni = antsApplyTransforms(
+      moving = simg,
+      fixed = mni,
+      transformlist = matrices,
+      interpolator = 'Linear',
+      whichtoinvert = c(0, 0, 1, 0),
+      verbose = verbose > 1
+    )
+    lesmni = antsApplyTransforms(
+      moving = segnative,
+      fixed = mni,
+      transformlist = matrices,
+      interpolator = 'NearestNeighbor',
+      whichtoinvert = c(0, 0, 1, 0),
+      verbose = verbose > 1
+    )
+
+    print_msg("Saving subject in MNI (ch2) space...",
+              verbose = verbose)
+    t1_template = file.path(outdir, 'Subject_in_MNI.nii.gz')
+    antsImageWrite(submni, t1_template)
+
+>>>>>>> upstream/master
     L$t1_template = t1_template
 
     print_msg("Saving lesion in MNI (ch2) space...",
@@ -420,6 +518,33 @@ linda_predict = function(
     lesion_template = file.path(outdir, 'Lesion_in_MNI.nii.gz')
     L$lesion_template = lesion_template
     antsImageWrite(lesmni, lesion_template)
+<<<<<<< HEAD
   }
+=======
+  } else {
+    print_msg("Skipping data transformation in MNI (ch2) ...", verbose = verbose)
+  }
+
+  tic = Sys.time()
+  runtime = paste(round(as.double(difftime(tic,toc)),1), units(difftime(tic,toc)))
+  print_msg(paste('Done!',runtime, '\n'), verbose=verbose)
+
+  }, split=TRUE, type='output') # end window capture
+
+  logFile = file.path(outdir, 'Console_Output.txt')
+  writeLines(outputLog, logFile)
+
+
+  # save environment data for transparency and reproducibility
+  if ('devtools' %in% installed.packages()) {
+    thisenvironment = devtools::session_info('LINDA')
+  } else {
+    thisenvironment = sessionInfo()
+  }
+  writeLines(suppressMessages(capture.output(thisenvironment)),
+             file.path(outdir, 'Session_Info.txt'))
+
+
+>>>>>>> upstream/master
   return(L)
 }
